@@ -1,0 +1,4 @@
+name = "keypom-nft-storage"
+main = "src/index.ts"
+compatibility_date = "2023-01-26"
+node_compat = true
