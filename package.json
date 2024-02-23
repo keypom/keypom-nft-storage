@@ -12,7 +12,7 @@
     "deploy": "wrangler publish"
   },
   "dependencies": {
-    "keypom-js": "^1.2.0-rc.1",
+    "keypom-js": "^1.4.0-rc.4",
     "nft.storage": "^7.0.0"
   }
 }

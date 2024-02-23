@@ -9,6 +9,12 @@
 // trick keypom so near-api-js isn't using window and browser key store
 process.versions.node = 'foo';
 
+const corsHeaders = {
+	'Access-Control-Allow-Origin': '*',
+	'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
+	'Access-Control-Max-Age': '86400',
+};
+
 import { initKeypom, claim, getDropInformation, parseNearAmount } from 'keypom-js';
 import { NFTStorage, File } from 'nft.storage'
 
@@ -25,6 +31,38 @@ export interface Env {
 
 const REQUIRED_DEPOSIT = parseNearAmount('0.1')
 
+async function handleOptions(request: Request) {
+	if (
+		request.headers.get('Origin') !== null &&
+		request.headers.get('Access-Control-Request-Method') !== null &&
+		request.headers.get('Access-Control-Request-Headers') !== null
+	) {
+		// Handle CORS preflight requests.
+		return new Response(null, {
+			headers: {
+				...corsHeaders,
+				'Access-Control-Allow-Headers': request.headers.get(
+					'Access-Control-Request-Headers'
+				)!,
+			},
+		});
+	} else {
+		// Handle standard OPTIONS request.
+		return new Response(null, {
+			headers: {
+				Allow: 'GET, HEAD, POST, OPTIONS',
+			},
+		});
+	}
+}
+
+const jsonResponse = (res: any) => new Response(res, {
+	'content-type': 'application/json',
+	headers: {
+		...corsHeaders
+	}
+})
+
 export default {
 	async fetch(
 		request: Request,
@@ -32,11 +70,17 @@ export default {
 		ctx: ExecutionContext
 	): Promise<Response> {
 
+		if (request.method === 'OPTIONS') {
+			// Handle CORS preflight requests
+			return handleOptions(request);
+		}
+
 		const { searchParams } = new URL(request.url)
+		const network = searchParams.get('network') || 'mainnet';
 		const secretKey = searchParams.get('secretKey');
 
 		await initKeypom({
-			network: 'testnet',
+			network,
 		})
 
 		let dropInfo = null
@@ -45,32 +89,44 @@ export default {
 				secretKey: secretKey!,
 			})
 		} catch (e) {
-			return new Response(JSON.stringify({ error: 'invalid drop' }));
+			return jsonResponse(JSON.stringify({ error: `Invalid drop. Network: ${network}. Secret: ${secretKey}. ${e}` }));
 		}
 
 		const enough = dropInfo!.deposit_per_use === REQUIRED_DEPOSIT
 		if (!enough) {
-			return new Response(JSON.stringify({ error: 'drop too small' }));
+			return jsonResponse(JSON.stringify({ error: 'drop too small' }));
 		}
 
 		let claimed = false
 		try {
 			const response = await claim({
 				secretKey: secretKey!,
-				accountId: 'md1.testnet'
+				accountId: searchParams.get('network') ? 'keypom.testnet' : 'keypom.near'
 			})
 			claimed = response[0].status.SuccessValue === ''
-		} catch(e) {
+		} catch (e) {
 			console.warn(e)
 		}
 
 		if (!claimed) {
-			return new Response(JSON.stringify({ error: 'drop not claimed' }));
+			return jsonResponse(JSON.stringify({ error: 'drop not claimed' }));
 		}
-		
+
+		const ab = await request.arrayBuffer()
+		const { byteLength } = ab
+
 		const client = new NFTStorage({ token: env.NFT_API_KEY })
-		let cid = await client.storeBlob(new Blob(["Hello World!"]))
-		return new Response(JSON.stringify(`https://ipfs.io/ipfs/${cid}`));
+		try {
+			var cid = await client.storeBlob(new Blob([ab]))
+		} catch (e) {
+			return jsonResponse(JSON.stringify({ error: 'media not uploaded' }));
+		}
+
+		return jsonResponse(JSON.stringify({
+			link: `https://ipfs.io/ipfs/${cid}`,
+			byteLength,
+
+		}));
 
 	},
 };
